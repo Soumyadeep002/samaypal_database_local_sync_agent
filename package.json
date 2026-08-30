@@ -1,0 +1,16 @@
+{
+  "name": "samaypaal-local-sync-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Outbound Windows agent that restores SamayPal AWS database dumps into local MongoDB",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "engines": {
+    "node": ">=18 <23"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3"
+  }
+}
