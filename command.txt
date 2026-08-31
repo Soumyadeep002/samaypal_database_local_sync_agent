@@ -1,0 +1,8 @@
+mongorestore \
+  --uri="mongodb://127.0.0.1:27017" \
+  --archive="/Users/apple/Desktop/samaypal_database_local_sync_agent/archives/sync_20260831_094236bbf7277fb4.archive.gz" \
+  --gzip \
+  --drop \
+  --nsInclude="attendance.*" \
+  --nsFrom="attendance.*" \
+  --nsTo="samaypaal_local.*"
