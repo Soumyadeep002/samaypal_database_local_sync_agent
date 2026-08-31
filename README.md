@@ -67,16 +67,26 @@ memory.
 1. A Super Admin clicks **Sync Database** in the AWS admin Settings page.
 2. AWS creates a temporary `mongodump --gzip` archive.
 3. The agent detects the ready sync over outbound HTTPS.
-4. The agent streams the archive to a temporary Windows file.
+4. The agent streams the archive to `local-sync-agent/archives/<syncId>.archive.gz`.
 5. The agent runs `mongorestore --drop`, mapping the AWS database name to the
    configured local database.
-6. The archive is deleted locally and on AWS after completion.
+6. The archive is retained locally after restore for backup, verification, or
+   troubleshooting. The AWS-side temporary archive is cleaned up by the
+   backend according to its retention process.
+
+Downloaded archives are stored in the `archives` directory under this agent.
+Keep enough disk space available for the complete compressed database dump.
 
 `--drop` drops each collection that is restored before writing its AWS copy.
 Existing local data in those collections will be overwritten. MongoDB's
 `--drop` option does not remove a local-only collection that is absent from
 the archive; remove such collections separately if strict collection-for-
 collection parity is required.
+
+The agent uses namespace mapping so all collections in the downloaded archive
+are written to the database named in `LOCAL_MONGODB_URI`. If `mongorestore`
+reports zero restored documents, the agent marks the synchronization as failed
+and keeps the archive in `archives` for inspection.
 
 ## Agent API protocol
 

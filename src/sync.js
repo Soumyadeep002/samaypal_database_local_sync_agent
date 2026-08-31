@@ -1,12 +1,12 @@
 const fs = require("fs");
 const fsp = require("fs/promises");
-const os = require("os");
 const path = require("path");
 const { pipeline } = require("stream/promises");
 const { Readable } = require("stream");
 const { spawn } = require("child_process");
 
 const SYNC_ID_PATTERN = /^sync_\d{8}_[a-f0-9]{16}$/;
+const ARCHIVE_DIR = path.resolve(__dirname, "../archives");
 
 function sanitizeToolDiagnostics(diagnostics) {
     return String(diagnostics || "")
@@ -86,7 +86,8 @@ async function downloadArchive(config, syncId) {
         throw new Error(body.message || "Database download was interrupted.");
     }
 
-    const archivePath = path.join(os.tmpdir(), `${syncId}.archive.gz`);
+    await fsp.mkdir(ARCHIVE_DIR, { recursive: true });
+    const archivePath = path.join(ARCHIVE_DIR, `${syncId}.archive.gz`);
     await fsp.rm(archivePath, { force: true }).catch(() => {});
     try {
         await pipeline(
@@ -151,23 +152,28 @@ async function validateMongorestore(config) {
     }
 }
 
-async function restoreArchive(config, archivePath, sourceDatabaseName) {
+async function restoreArchive(config, archivePath) {
     const args = [
         `--uri=${config.localMongoUri}`,
         `--archive=${archivePath}`,
         "--gzip",
-        "--drop"
+        "--drop",
+        // The dump may contain a database name different from the local URI.
+        // Match the archive namespace broadly and restore all collections into
+        // the explicitly configured local database.
+        "--nsFrom=*",
+        `--nsTo=${config.localDatabaseName}.*`
     ];
-    if (sourceDatabaseName) {
-        args.push(
-            `--nsFrom=${sourceDatabaseName}.*`,
-            `--nsTo=${config.localDatabaseName}.*`
-        );
-    }
     const result = await runCommand(config.mongorestorePath, args);
     const diagnostics = sanitizeToolDiagnostics(`${result.stderr}\n${result.stdout}`);
     if (diagnostics.trim()) {
         console.log(`[SYNC] mongorestore diagnostics:\n${diagnostics}`);
+    }
+    const restoredMatch = diagnostics.match(/([\d,]+)\s+document\(s\)\s+restored successfully/i);
+    if (restoredMatch && Number(restoredMatch[1].replace(/,/g, "")) === 0) {
+        throw new Error(
+            "mongorestore completed but restored 0 documents. The archive may be empty or incompatible with the installed MongoDB tools."
+        );
     }
 }
 
@@ -186,11 +192,11 @@ async function performSync(config, job) {
         );
         await reportSyncStatus(config, syncId, "RESTORING");
         console.log("[SYNC] Restoring local MongoDB...");
-        await restoreArchive(config, archivePath, job.databaseName);
+        await restoreArchive(config, archivePath);
         console.log("[SYNC] Restore completed");
 
         await reportSyncStatus(config, syncId, "COMPLETED");
-        console.log("[SYNC] Cleaning temporary files");
+        console.log(`[SYNC] Archive retained at: ${archivePath}`);
         console.log("[SYNC] Synchronization completed successfully");
     } catch (error) {
         console.error("[SYNC] Synchronization failed:", error.message);
@@ -199,8 +205,6 @@ async function performSync(config, job) {
         } catch (reportError) {
             console.error("[SYNC] Could not report failure to AWS:", reportError.message);
         }
-    } finally {
-        if (archivePath) await fsp.rm(archivePath, { force: true }).catch(() => {});
     }
 }
 
