@@ -152,16 +152,32 @@ async function validateMongorestore(config) {
     }
 }
 
-async function restoreArchive(config, archivePath) {
+function restoreConnectionUri(uri) {
+    try {
+        const parsed = new URL(uri);
+        parsed.pathname = "";
+        return parsed.toString().replace(/\/+$/, "");
+    } catch {
+        return uri;
+    }
+}
+
+function sourceNamespace(sourceDatabaseName) {
+    const name = String(sourceDatabaseName || "").trim();
+    return /^[A-Za-z0-9_-]+$/.test(name) ? `${name}.*` : "*.*";
+}
+
+async function restoreArchive(config, archivePath, sourceDatabaseName) {
+    const sourceNs = sourceNamespace(sourceDatabaseName);
     const args = [
-        `--uri=${config.localMongoUri}`,
+        // Do not put the local database in the URI. mongorestore treats that as
+        // --db and only restores matching namespaces from the archive.
+        `--uri=${restoreConnectionUri(config.localMongoUri)}`,
         `--archive=${archivePath}`,
         "--gzip",
         "--drop",
-        // The dump may contain a database name different from the local URI.
-        // Match the archive namespace broadly and restore all collections into
-        // the explicitly configured local database.
-        "--nsFrom=*",
+        `--nsInclude=${sourceNs}`,
+        `--nsFrom=${sourceNs}`,
         `--nsTo=${config.localDatabaseName}.*`
     ];
     const result = await runCommand(config.mongorestorePath, args);
@@ -192,7 +208,7 @@ async function performSync(config, job) {
         );
         await reportSyncStatus(config, syncId, "RESTORING");
         console.log("[SYNC] Restoring local MongoDB...");
-        await restoreArchive(config, archivePath);
+        await restoreArchive(config, archivePath, job.databaseName);
         console.log("[SYNC] Restore completed");
 
         await reportSyncStatus(config, syncId, "COMPLETED");
